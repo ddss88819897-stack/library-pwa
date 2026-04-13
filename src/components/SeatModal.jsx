@@ -1,161 +1,183 @@
-import React, { useEffect } from 'react';
-import { QRCodeCanvas } from 'qrcode.react';
+import React, { useState, useEffect } from 'react';
+// 🔥 [수정됨] DB 저장을 위한 파이어베이스 도구들 불러오기
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from '../firebase';
 
-const SeatModal = ({
-  selectedSeat, setSelectedSeat, user, isAdmin, currentUserData,
-  showCancelWarning, setShowCancelWarning, cancelWarningData,
-  reservationStep, setReservationStep, reserveHours, setReserveHours,
-  reminderMinutes, setReminderMinutes, hasReserved,
-  showSeatQR, setShowSeatQR, qrString, setQrString, timeLeft, setTimeLeft,
-  handleAction, handleCancelClick, calculateElapsedTime
-}) => {
+export default function SeatModal({
+  selectedSeat, setSelectedSeat, user, handleAction
+}) {
+  const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [startTime, setStartTime] = useState(null);
+  const [endTime, setEndTime] = useState(null);
+  const [showConfirmPopup, setShowConfirmPopup] = useState(false);
 
-  // 스캐너 인증 성공 시 팝업 띄우고 창 닫기
   useEffect(() => {
-    // QR 화면이 켜져 있는데, 좌석 상태가 '사용 중(OCCUPIED)'으로 변했다면? = 스캔 성공!
-    if (showSeatQR && selectedSeat?.status === 'OCCUPIED') {
-      
-      // 1. 사용자에게 기분 좋은 성공 알림 띄우기! 🎉
-      alert("✅ 인증이 완료되었습니다. 좌석 사용을 시작합니다!");
-      
-      // 2. 창 닫기 로직 실행
-      setShowSeatQR(false);
-      setSelectedSeat(null);
-    }
-  }, [selectedSeat?.status, showSeatQR, setSelectedSeat, setShowSeatQR]);
+    setStartTime(null); setEndTime(null);
+  }, [selectedDate]);
 
   if (!selectedSeat) return null;
 
-  return (
-    <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(5px)', padding: '20px', boxSizing: 'border-box' }}>
-      <div style={{ background: '#fff', padding: '30px 20px', borderRadius: '25px', width: '100%', maxWidth: '380px', textAlign: 'center', boxShadow: '0 20px 50px rgba(0,0,0,0.3)', boxSizing: 'border-box' }}>
-        <h2 style={{ marginBottom: '20px', color: '#0f172a', fontWeight: '900', fontSize: '1.6rem', wordBreak: 'keep-all' }}>{selectedSeat.label}</h2>
-        
-        {selectedSeat.userId && (isAdmin || selectedSeat.userId === user?.email) && (
-          <div style={{ background: '#f1f5f9', padding: '15px', borderRadius: '15px', marginBottom: '20px', textAlign: 'left', fontSize: '0.95rem', border: '2px solid #cbd5e1', wordBreak: 'break-all' }}>
-            <p style={{ margin: '8px 0', color: '#0f172a' }}><b>이름:</b> {selectedSeat.userName || (selectedSeat.userId === user?.email ? currentUserData?.name : "기록 없음") || selectedSeat.userId.split('@')[0]}</p>
-            <p style={{ margin: '8px 0', color: '#0f172a' }}><b>학번:</b> {selectedSeat.userId.split('@')[0]}</p>
-            {isAdmin && selectedSeat.status === 'OCCUPIED' && (<p style={{ margin: '8px 0', color: '#dc2626', fontWeight: '900' }}><b>이용 시간:</b> ⏱️ {calculateElapsedTime(selectedSeat.startedAt)}</p>)}
-          </div>
-        )}
-
-        {showCancelWarning && selectedSeat.status === 'RESERVED' && (selectedSeat.userId === user?.email || isAdmin) ? (
-          <div style={{ background: '#fef2f2', padding: '20px 15px', borderRadius: '15px', border: '3px solid #f87171', animation: 'fadeIn 0.3s' }}>
-            <h3 style={{ color: '#dc2626', margin: '0 0 15px 0', fontSize: '1.3rem', fontWeight: '900' }}>⚠️ 패널티 경고</h3>
-            <p style={{ color: '#7f1d1d', fontSize: '0.95rem', marginBottom: '10px', lineHeight: '1.5', fontWeight: '700' }}>정말 예약을 취소하시겠습니까?</p>
-            <div style={{ background: '#fca5a5', padding: '10px', borderRadius: '10px', marginBottom: '20px' }}>
-              <p style={{ margin: '5px 0', color: '#7f1d1d', fontWeight: '900', fontSize: '0.9rem' }}>[현재 내 계정 상태]</p>
-              <p style={{ margin: '5px 0', color: '#7f1d1d', fontWeight: '700', fontSize: '0.9rem' }}>누적 취소: <span style={{fontSize:'1.1rem', color:'#991b1b'}}>{cancelWarningData?.cancelCount || 0}</span> 회 (3회 시 정지)</p>
-              <p style={{ margin: '5px 0', color: '#7f1d1d', fontWeight: '700', fontSize: '0.9rem' }}>받은 패널티: <span style={{fontSize:'1.1rem', color:'#991b1b'}}>{cancelWarningData?.penaltyCount || 0}</span> 단계</p>
-            </div>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button onClick={() => handleAction(selectedSeat.id, 'CANCEL')} style={{ flex: 1, padding: '14px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: '900', cursor: 'pointer', fontSize: '1rem' }}>예(취소)</button>
-              <button onClick={() => setShowCancelWarning(false)} style={{ flex: 1, padding: '14px', background: '#64748b', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: '900', cursor: 'pointer', fontSize: '1rem' }}>돌아가기</button>
-            </div>
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '15px', width: '100%' }}>
-            
-            {selectedSeat.status === 'AVAILABLE' && (!hasReserved || isAdmin) && (
-              <>
-                {reservationStep === 1 ? (
-                  <>
-                    <select value={reserveHours} onChange={e => setReserveHours(Number(e.target.value))} style={{ width: '100%', padding: '16px', borderRadius: '15px', border: '2px solid #94a3b8', textAlign: 'center', fontWeight: '900', fontSize: '1rem', color: '#0f172a', backgroundColor: '#f8fafc', cursor: 'pointer', outline: 'none', boxSizing: 'border-box' }}>
-                      {[1,2,3,4,5].map(h => <option key={h} value={h}>{h}시간 예약</option>)}
-                    </select>
-                    <button onClick={() => setReservationStep(2)} style={{ width: '100%', padding: '18px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '15px', fontWeight: '900', cursor: 'pointer', fontSize: '1.1rem', transition: '0.2s', boxShadow: '0 4px 10px rgba(59, 130, 246, 0.3)', boxSizing: 'border-box' }}>지금 예약하기</button>
-                  </>
-                ) : (
-                  <>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', background: '#f8fafc', padding: '15px', borderRadius: '15px', border: '2px solid #e2e8f0', width: '100%', boxSizing: 'border-box' }}>
-                      <label style={{ fontSize: '1rem', fontWeight: '900', color: '#1e293b', textAlign: 'center' }}>⏰ 퇴실 사전 알림 설정</label>
-                      <select value={reminderMinutes} onChange={(e) => setReminderMinutes(Number(e.target.value))} style={{ width: '100%', padding: '14px', borderRadius: '12px', border: '2px solid #cbd5e1', textAlign: 'center', fontWeight: '900', fontSize: '0.95rem', color: '#0f172a', backgroundColor: '#fff', cursor: 'pointer', boxSizing: 'border-box' }}>
-                        <option value={10}>10분 전 알림</option>
-                        <option value={15}>15분 전 알림</option>
-                        <option value={20}>20분 전 알림 (기본)</option>
-                        <option value={25}>25분 전 알림</option>
-                        <option value={30}>30분 전 알림</option>
-                        <option value={0}>알림 받지 않음</option>
-                      </select>
-                    </div>
-                    <div style={{ display: 'flex', gap: '8px', width: '100%' }}>
-                      <button onClick={() => setReservationStep(1)} style={{ flex: 1, padding: '16px 0', background: '#94a3b8', color: '#fff', border: 'none', borderRadius: '15px', fontWeight: '900', cursor: 'pointer', fontSize: '1rem', transition: '0.2s' }}>⬅️ 뒤로</button>
-                      <button onClick={() => { handleAction(selectedSeat.id, 'RESERVED', reserveHours); setReservationStep(1); }} style={{ flex: 2, padding: '16px 0', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '15px', fontWeight: '900', cursor: 'pointer', fontSize: '1.1rem', transition: '0.2s', boxShadow: '0 4px 6px rgba(22, 163, 74, 0.3)' }}>✅ 최종 확정</button>
-                    </div>
-                  </>
-                )}
-              </>
-            )}
-
-            {selectedSeat.status === 'RESERVED' && (selectedSeat.userId === user?.email || isAdmin) && (
-              <>
-                {!isAdmin && (
-                  !showSeatQR ? (
-                    <button 
-                      onClick={() => {
-                        const studentId = user?.studentNo || user?.email?.split('@')[0];
-                        setQrString(`${studentId}_${Date.now()}`); 
-                        setTimeLeft(15); 
-                        setShowSeatQR(true);
-                      }} 
-                      style={{ width: '100%', padding: '18px', background: '#24c15e', color: '#fff', border: 'none', borderRadius: '15px', fontWeight: '900', fontSize: '1.1rem', cursor: 'pointer', boxSizing: 'border-box', marginBottom: '8px' }}
-                    >
-                      QR 인증하기
-                    </button>
-                  ) : (
-                    <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '15px', marginBottom: '8px', border: '2px solid #e2e8f0', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                      <p style={{ margin: '0 0 10px 0', fontWeight: '900', color: '#0f172a' }}>입구 키오스크에 스캔하세요</p>
-                      <div style={{ background: '#fff', padding: '10px', borderRadius: '10px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
-                        <QRCodeCanvas value={qrString} size={150} />
-                      </div>
-                      <p style={{ color: '#dc2626', fontWeight: '900', marginTop: '15px', fontSize: '1.1rem', animation: timeLeft <= 5 ? 'blink 1s infinite' : 'none' }}>
-                        남은 시간: {timeLeft}초
-                      </p>
-                      <button onClick={() => setShowSeatQR(false)} style={{ marginTop: '10px', padding: '8px 20px', background: '#94a3b8', color: '#fff', border: 'none', borderRadius: '10px', fontWeight: '900', cursor: 'pointer' }}>
-                        QR 닫기
-                      </button>
-                    </div>
-                  )
-                )}
-                {isAdmin && (
-                  <button onClick={() => handleAction(selectedSeat.id, 'OCCUPY')} style={{ width: '100%', padding: '18px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '15px', fontWeight: '900', fontSize: '1.1rem', cursor: 'pointer', boxSizing: 'border-box', marginBottom: '8px' }}>
-                    착석 인증 완료 (수동)
-                  </button>
-                )}
-                {!showSeatQR && (
-                  <button onClick={handleCancelClick} style={{ width: '100%', padding: '18px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: '15px', fontWeight: '900', fontSize: '1.1rem', cursor: 'pointer', boxSizing: 'border-box', marginBottom: '8px' }}>
-                    예약 취소
-                  </button>
-                )}
-              </>
-            )}
-
-            {selectedSeat.status === 'OCCUPIED' && (selectedSeat.userId === user?.email || isAdmin) && (
-              <button onClick={() => handleAction(selectedSeat.id, 'RETURN')} style={{ width: '100%', padding: '18px', background: '#ca8a04', color: '#fff', border: 'none', borderRadius: '15px', fontWeight: '900', fontSize: '1.1rem', cursor: 'pointer', boxSizing: 'border-box' }}>퇴실 및 반납</button>
-            )}
-
-            {isAdmin && (
-              <button 
-                onClick={() => handleAction(selectedSeat.id, selectedSeat.status === 'DISABLED' ? 'ENABLE' : 'DISABLE')} 
-                style={{ width: '100%', padding: '18px', background: selectedSeat.status === 'DISABLED' ? '#2563eb' : '#e34646', color: '#fff', border: 'none', borderRadius: '15px', fontWeight: '900', fontSize: '1.1rem', cursor: 'pointer', boxSizing: 'border-box', marginTop: '4px' }}
-              >
-                {selectedSeat.status === 'DISABLED' ? '좌석 다시 개방하기' : '좌석 비활성화'}
-              </button>
-            )}
-
-            <button 
-              onClick={() => { 
-                setSelectedSeat(null); setShowCancelWarning(false); setReservationStep(1); setShowSeatQR(false); 
-              }} 
-              style={{ width: '100%', padding: '18px', background: '#475569', color: '#fff', border: 'none', borderRadius: '15px', fontWeight: '900', cursor: 'pointer', fontSize: '1.1rem', transition: '0.2s', boxShadow: '0 4px 10px rgba(71, 85, 105, 0.3)', marginTop: '4px', boxSizing: 'border-box' }}
-            >
-              창 닫기
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
+  const year = currentMonth.getFullYear();
+  const month = currentMonth.getMonth();
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  
+  const calendarDays = Array(firstDay).fill(null).concat(
+    [...Array(daysInMonth).keys()].map(i => new Date(year, month, i + 1))
   );
-};
 
-export default SeatModal;
+  const timeSlots = [];
+  for (let h = 9; h <= 22; h++) {
+    timeSlots.push(`${String(h).padStart(2, '0')}:00`);
+    if (h !== 22) timeSlots.push(`${String(h).padStart(2, '0')}:30`);
+  }
+
+  const isSameDate = (d1, d2) => d1 && d2 && d1.getFullYear() === d2.getFullYear() && d1.getMonth() === d2.getMonth() && d1.getDate() === d2.getDate();
+  const isPastDate = (date) => { const today = new Date(); today.setHours(0, 0, 0, 0); return date < today; };
+  const isTimeBefore = (time1, time2) => {
+    if (!time1 || !time2) return false;
+    const [h1, m1] = time1.split(':').map(Number);
+    const [h2, m2] = time2.split(':').map(Number);
+    return h1 * 60 + m1 < h2 * 60 + m2;
+  };
+
+  const handleInitialClick = () => {
+    if (!startTime || !endTime) return alert("🚨 시작 시간과 종료 시간을 모두 선택해주세요!");
+    if (!isTimeBefore(startTime, endTime)) return alert("🚨 종료 시간은 시작 시간보다 늦어야 합니다!");
+    setShowConfirmPopup(true);
+  };
+
+  // 🔥 [핵심 수정!] 팝업에서 [예, 확정합니다] 클릭 시 진짜 파이어베이스에 저장!
+  const handleFinalReserve = async () => {
+    try {
+      const formattedDate = `${year}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
+
+      // 1️⃣ 마이페이지용 예약 데이터 저장
+      await addDoc(collection(db, "Reservations"), {
+        seatId: selectedSeat.id,
+        userId: user.email,
+        date: formattedDate,
+        startTime: startTime,
+        endTime: endTime,
+        status: 'RESERVED',
+        createdAt: serverTimestamp()
+      });
+
+      // 2️⃣ 알림(🔔)을 울리게 하는 로그 데이터 저장!
+      await addDoc(collection(db, "Log"), {
+        action: 'RESERVE',
+        seatId: selectedSeat.id,
+        seatLabel: selectedSeat.id,
+        uid: user.email,
+        result: '시간 지정 예약 완료',
+        createdAt: serverTimestamp()
+      });
+
+      alert(`🎉 예약이 완료되었습니다!\n[${selectedDate.getMonth() + 1}월 ${selectedDate.getDate()}일 ${startTime} ~ ${endTime}]\n\n예약 내역은 마이페이지에서 확인 가능합니다.`);
+      setShowConfirmPopup(false);
+      setSelectedSeat(null);
+    } catch (error) {
+      console.error("DB 저장 에러:", error);
+      alert("🚨 예약 처리 중 문제가 발생했습니다.");
+    }
+  };
+
+  return (
+    <>
+      {showConfirmPopup && (
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(0, 0, 0, 0.6)', backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 99999, padding: '20px', boxSizing: 'border-box' }}>
+          <div style={{ background: '#fff', padding: '35px 25px', borderRadius: '24px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.3)', width: '100%', maxWidth: '400px', textAlign: 'center' }}>
+            <h3 style={{ margin: '0 0 15px 0', fontSize: '1.4rem', color: '#0f172a', fontWeight: '900' }}>예약을 확정하시겠습니까?</h3>
+            <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '16px', marginBottom: '25px', color: '#334155', fontWeight: '700', border: '1px solid #e2e8f0' }}>
+              <p style={{ margin: '0 0 8px 0', fontSize: '1.1rem' }}>📌 <strong style={{color: '#0f172a'}}>{selectedSeat.id}</strong> 좌석</p>
+              <p style={{ margin: '0 0 8px 0' }}>📅 {selectedDate.getMonth() + 1}월 {selectedDate.getDate()}일</p>
+              <p style={{ margin: 0, color: '#2563eb', fontSize: '1.2rem', fontWeight: '900' }}>⏰ {startTime} ~ {endTime}</p>
+            </div>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button onClick={() => setShowConfirmPopup(false)} style={{ flex: 1, padding: '16px', borderRadius: '14px', border: 'none', background: '#f1f5f9', color: '#64748b', fontWeight: '900', fontSize: '1rem', cursor: 'pointer', transition: '0.2s' }}>아니오</button>
+              <button onClick={handleFinalReserve} style={{ flex: 1, padding: '16px', borderRadius: '14px', border: 'none', background: '#2563eb', color: '#fff', fontWeight: '900', fontSize: '1rem', cursor: 'pointer', boxShadow: '0 4px 10px rgba(37, 99, 235, 0.3)', transition: '0.2s' }}>예, 확정합니다!</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(15, 23, 42, 0.7)', backdropFilter: 'blur(5px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 999, padding: '20px', boxSizing: 'border-box' }}>
+        <div style={{ position: 'relative', width: '100%', maxWidth: '550px', backgroundColor: '#fff', borderRadius: '24px', padding: '30px', boxSizing: 'border-box', boxShadow: '0 20px 40px rgba(0,0,0,0.2)', maxHeight: '90vh', overflowY: 'auto', msOverflowStyle: 'none', scrollbarWidth: 'none' }}>
+          
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+            <h2 style={{ margin: 0, fontSize: '1.6rem', fontWeight: '900', color: '#0f172a' }}>{selectedSeat.id} 예약</h2>
+            <button onClick={() => setSelectedSeat(null)} style={{ background: '#f1f5f9', border: 'none', width: '36px', height: '36px', borderRadius: '50%', fontSize: '1.2rem', cursor: 'pointer', color: '#475569', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
+          </div>
+
+          <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '16px', marginBottom: '25px', border: '1px solid #e2e8f0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+              <button onClick={() => setCurrentMonth(new Date(year, month - 1, 1))} style={{ background: 'none', border: 'none', fontSize: '1.2rem', cursor: 'pointer', color: '#64748b' }}>◀</button>
+              <strong style={{ fontSize: '1.1rem', color: '#1e293b' }}>{year}년 {month + 1}월</strong>
+              <button onClick={() => setCurrentMonth(new Date(year, month + 1, 1))} style={{ background: 'none', border: 'none', fontSize: '1.2rem', cursor: 'pointer', color: '#64748b' }}>▶</button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '5px', textAlign: 'center', marginBottom: '10px', fontSize: '0.85rem', fontWeight: '900', color: '#94a3b8' }}>
+              <div style={{color: '#ef4444'}}>일</div><div>월</div><div>화</div><div>수</div><div>목</div><div>금</div><div style={{color: '#3b82f6'}}>토</div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '5px' }}>
+              {calendarDays.map((date, idx) => {
+                if (!date) return <div key={idx} />;
+                const isPast = isPastDate(date);
+                const isSelected = isSameDate(date, selectedDate);
+                const isToday = isSameDate(date, new Date());
+                return (
+                  <div 
+                    key={idx} onClick={() => !isPast && setSelectedDate(date)}
+                    style={{ 
+                      aspectRatio: '1', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '10px', fontSize: '0.95rem', fontWeight: '700', transition: 'all 0.2s', cursor: isPast ? 'not-allowed' : 'pointer', opacity: isPast ? 0.3 : 1, background: isSelected ? '#2563eb' : (isToday ? '#dbeafe' : 'transparent'), color: isSelected ? '#fff' : (isToday ? '#1d4ed8' : '#334155'), border: isToday && !isSelected ? '2px solid #bfdbfe' : 'none'
+                    }}
+                  >{date.getDate()}</div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div>
+              <h3 style={{ fontSize: '1rem', fontWeight: '800', color: '#1e293b', marginBottom: '10px' }}>시작 시간</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(70px, 1fr))', gap: '8px' }}>
+                {timeSlots.map(time => {
+                  const isSelected = startTime === time;
+                  return (
+                    <button 
+                      key={`start-${time}`} onClick={() => { setStartTime(time); if(endTime && !isTimeBefore(time, endTime)) setEndTime(null); }}
+                      style={{ padding: '10px 0', borderRadius: '10px', border: `1px solid ${isSelected ? '#2563eb' : '#cbd5e1'}`, background: isSelected ? '#eff6ff' : '#fff', color: isSelected ? '#2563eb' : '#475569', fontWeight: '800', fontSize: '0.9rem', cursor: 'pointer', transition: '0.2s' }}
+                    >{time}</button>
+                  )
+                })}
+              </div>
+            </div>
+            <div style={{ opacity: startTime ? 1 : 0.4, transition: '0.3s' }}>
+              <h3 style={{ fontSize: '1rem', fontWeight: '800', color: '#1e293b', marginBottom: '10px' }}>종료 시간</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(70px, 1fr))', gap: '8px' }}>
+                {timeSlots.map(time => {
+                  const isSelected = endTime === time;
+                  const isDisabled = !startTime || !isTimeBefore(startTime, time);
+                  return (
+                    <button 
+                      key={`end-${time}`} disabled={isDisabled} onClick={() => setEndTime(time)}
+                      style={{ padding: '10px 0', borderRadius: '10px', border: `1px solid ${isSelected ? '#16a34a' : '#cbd5e1'}`, background: isSelected ? '#f0fdf4' : (isDisabled ? '#f1f5f9' : '#fff'), color: isSelected ? '#16a34a' : (isDisabled ? '#94a3b8' : '#475569'), fontWeight: '800', fontSize: '0.9rem', cursor: isDisabled ? 'not-allowed' : 'pointer', transition: '0.2s' }}
+                    >{time}</button>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+
+          <button 
+            onClick={handleInitialClick} 
+            style={{ width: '100%', padding: '18px', marginTop: '30px', background: (startTime && endTime) ? '#2563eb' : '#94a3b8', color: '#fff', border: 'none', borderRadius: '16px', fontWeight: '900', fontSize: '1.1rem', cursor: (startTime && endTime) ? 'pointer' : 'not-allowed', transition: '0.3s', boxShadow: (startTime && endTime) ? '0 4px 15px rgba(37, 99, 235, 0.3)' : 'none' }}
+          >
+            예약 확정하기
+          </button>
+
+        </div>
+      </div>
+    </>
+  );
+}

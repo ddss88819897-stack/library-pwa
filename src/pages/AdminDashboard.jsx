@@ -117,26 +117,56 @@ const AdminDashboard = ({
               <strong style={{ fontSize: '1rem', color: '#1e293b', fontWeight: '900' }}>🎓 시험 기간 모드</strong>
               <span style={{ background: isExamActive ? '#2563eb' : '#f1f5f9', color: isExamActive ? '#fff' : '#64748b', padding: '6px 14px', borderRadius: '20px', fontSize: '0.8rem', fontWeight: '900' }}>{isExamActive ? '가동 중' : '일반 모드'}</span>
             </div>
+            
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '15px', marginBottom: '20px' }}>
+              
+              {/* 1. 시작 일시 입력칸 */}
               <div style={{ flex: '1 1 200px', display: 'flex', flexDirection: 'column', gap: '8px', minWidth: 0 }}>
                 <label style={{ fontSize: '0.85rem', fontWeight: '900', color: '#475569' }}>시작 일시</label>
                 <div style={{ position: 'relative', width: '100%', height: '50px' }}>
-                  <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', padding: '0 15px', borderRadius: '12px', border: '2px solid #cbd5e1', backgroundColor: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxSizing: 'border-box', boxShadow: '0 2px 4px rgba(0,0,0,0.02) inset', color: examStartDate ? '#000000' : '#94a3b8', fontWeight: '700', fontSize: '0.95rem' }}>
+                  
+                  {/* 눈에 보이는 예쁜 디자인 박스 (pointerEvents: 'none'으로 클릭 무시) */}
+                  <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', padding: '0 15px', borderRadius: '12px', border: '2px solid #cbd5e1', backgroundColor: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxSizing: 'border-box', boxShadow: '0 2px 4px rgba(0,0,0,0.02) inset', color: examStartDate ? '#000000' : '#94a3b8', fontWeight: '700', fontSize: '0.95rem', pointerEvents: 'none' }}>
                     <span>{examStartDate ? examStartDate.replace('T', ' ') : '연도. 월. 일. -- : --'}</span><span style={{ fontSize: '1.2rem' }}>📅</span>
                   </div>
-                  <input type="datetime-local" value={examStartDate} onChange={e => setExamStartDate(e.target.value)} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer', boxSizing: 'border-box' }} />
+                  
+                  {/* 진짜 달력 인풋 (가장 위에 투명하게 덮음) */}
+                  <input 
+                    type="datetime-local" 
+                    value={examStartDate} 
+                    onChange={e => setExamStartDate(e.target.value)} 
+                    onClick={(e) => {
+                      // e.preventDefault() 삭제! (이게 달력을 막고 있었음)
+                      if (e.target.showPicker) e.target.showPicker();
+                    }} 
+                    style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer', boxSizing: 'border-box', zIndex: 10 }} 
+                  />
                 </div>
               </div>
+
+              {/* 2. 종료 일시 입력칸 */}
               <div style={{ flex: '1 1 200px', display: 'flex', flexDirection: 'column', gap: '8px', minWidth: 0 }}>
                 <label style={{ fontSize: '0.85rem', fontWeight: '900', color: '#475569' }}>종료 일시</label>
                 <div style={{ position: 'relative', width: '100%', height: '50px' }}>
-                  <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', padding: '0 15px', borderRadius: '12px', border: '2px solid #cbd5e1', backgroundColor: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxSizing: 'border-box', boxShadow: '0 2px 4px rgba(0,0,0,0.02) inset', color: examEndDate ? '#000000' : '#94a3b8', fontWeight: '700', fontSize: '0.95rem' }}>
+                  
+                  <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', padding: '0 15px', borderRadius: '12px', border: '2px solid #cbd5e1', backgroundColor: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxSizing: 'border-box', boxShadow: '0 2px 4px rgba(0,0,0,0.02) inset', color: examEndDate ? '#000000' : '#94a3b8', fontWeight: '700', fontSize: '0.95rem', pointerEvents: 'none' }}>
                     <span>{examEndDate ? examEndDate.replace('T', ' ') : '연도. 월. 일. -- : --'}</span><span style={{ fontSize: '1.2rem' }}>📅</span>
                   </div>
-                  <input type="datetime-local" value={examEndDate} onChange={e => setExamEndDate(e.target.value)} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer', boxSizing: 'border-box' }} />
+                  
+                  <input 
+                    type="datetime-local" 
+                    value={examEndDate} 
+                    onChange={e => setExamEndDate(e.target.value)} 
+                    onClick={(e) => {
+                      if (e.target.showPicker) e.target.showPicker();
+                    }} 
+                    style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer', boxSizing: 'border-box', zIndex: 10 }} 
+                  />
                 </div>
               </div>
             </div>
+
+            {/* 설정 저장 버튼 */}
             <button onClick={() => { if (window.confirm(isExamActive ? "해제하시겠습니까?" : "시작하시겠습니까?")) isExamActive ? clearExamPeriod() : saveExamPeriod(); }} style={{ width: '100%', padding: '16px', background: isExamActive ? '#ef4444' : '#2563eb', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: '900', fontSize: '1rem', cursor: 'pointer', boxShadow: '0 4px 10px rgba(37, 99, 235, 0.2)' }}>
               {isExamActive ? '❌ 통제 해제' : '✅ 설정 저장 및 통제 시작'}
             </button>

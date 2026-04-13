@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { auth, db } from './firebase'; 
 import { signOut } from 'firebase/auth';
-import { doc, getDoc, setDoc, updateDoc, increment } from 'firebase/firestore'; 
+import { doc, getDoc, setDoc, onSnapshot, updateDoc, increment, collection } from 'firebase/firestore'; 
 
 import MyPage from './pages/MyPage';
 import ScannerPage from './pages/Scanner';
@@ -14,6 +14,21 @@ import { useLibraryData } from './hooks/useLibraryData';
 import { useUserSession } from './hooks/useUserSession';
 import { useLibrarySystem } from './hooks/useLibrarySystem';
 import { handleLibraryAction, calculateElapsedTime } from './api/libraryService';
+
+// 🔔 알림 텍스트 헬퍼 함수
+const getNotificationText = (action, seatLabel) => {
+  const label = seatLabel || '좌석';
+  switch (action) {
+    case 'RESERVE': return `✅ ${label} 예약이 완료되었습니다.`;
+    case 'CANCEL': return `🗑️ ${label} 예약이 취소되었습니다.`;
+    case 'NO_SHOW_CANCEL': return `🚨 ${label} 미입실로 예약이 취소되었습니다.`;
+    case 'CHECK_IN': return `📲 ${label} 입실이 확인되었습니다.`;
+    case 'RETURN': return `👋 ${label} 퇴실 처리되었습니다.`;
+    case 'AUTO_CHECKOUT': return `⏳ ${label} 이용 시간이 만료되어 자동 퇴실되었습니다.`;
+    case 'FORCE_EVICT': return `❌ ${label} 관리자에 의해 강제 퇴실되었습니다.`;
+    default: return `🔔 ${label}에 새로운 변경사항이 있습니다.`;
+  }
+};
 
 function App() {
   const { seats, user, currentUserData } = useLibraryData();
@@ -38,27 +53,79 @@ function App() {
   const [examEndDate, setExamEndDate] = useState('');
   const [isExamActive, setIsExamActive] = useState(false);
 
+  // 🔔 알림 시스템 상태 관리
+  const [notifications, setNotifications] = useState([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [lastReadTime, setLastReadTime] = useState(() => {
+    return parseInt(localStorage.getItem(`lastRead_${user?.email}`) || '0', 10);
+  });
+
   useUserSession(user);
+
+  // 🔥 [핵심 수정 1] 내 활동 로그(알림) 마이페이지와 동일한 무적 로직으로 변경!
+  useEffect(() => {
+    if (!user) return;
+    const unsub = onSnapshot(collection(db, 'Log'), (snap) => {
+      const logs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+        // 내 이메일, UID, 학번, 이름 중 하나라도 겹치면 다 가져옴!
+        .filter(log => 
+          log.uid === user?.uid || log.uid === user?.email ||       
+          log.studentNo === user?.studentNo || log.studentNo === user?.name      
+        )
+        // timestamp와 createdAt을 모두 호환해서 정렬!
+        .sort((a, b) => {
+          const timeA = (a.timestamp || a.createdAt)?.toDate ? (a.timestamp || a.createdAt).toDate().getTime() : 0;
+          const timeB = (b.timestamp || b.createdAt)?.toDate ? (b.timestamp || b.createdAt).toDate().getTime() : 0;
+          return timeB - timeA;
+        });
+      setNotifications(logs);
+    });
+    return () => unsub();
+  }, [user]);
+
+  // 🔥 [핵심 수정 2] 안 읽은 알림 개수 세는 로직도 timestamp/createdAt 완벽 호환!
+  const unreadCount = notifications.filter(n => {
+    const time = (n.timestamp || n.createdAt)?.toDate ? (n.timestamp || n.createdAt).toDate().getTime() : 0;
+    return time > lastReadTime;
+  }).length;
+
+  const toggleNotifications = () => {
+    setShowNotifications(!showNotifications);
+    if (!showNotifications) {
+      const now = Date.now();
+      setLastReadTime(now);
+      localStorage.setItem(`lastRead_${user?.email}`, now.toString());
+    }
+  };
+
+  useEffect(() => {
+    const unsubConfig = onSnapshot(doc(db, "System", "config"), (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        setExamStartDate(data.examStartDate || '');
+        setExamEndDate(data.examEndDate || '');
+        setIsExamActive(data.isExamActive || false);
+      }
+    });
+    return () => unsubConfig();
+  }, []);  
 
   const now = useLibrarySystem(
     seats, user, isAdmin, isExamActive, examEndDate,
     setExamStartDate, setExamEndDate, setIsExamActive
   );
 
+  const currentTime = new Date();
   const isExamPeriod = Boolean(
     isExamActive && examStartDate && examEndDate && 
-    now >= new Date(examStartDate) && now <= new Date(examEndDate)
+    currentTime >= new Date(examStartDate) && currentTime <= new Date(examEndDate)
   );
 
   const hasReserved = seats.some(seat => seat.userId === user?.email);
 
-  // 🔥 실시간 좌석 상태 동기화 (QR 인증 시 모달창 자동 닫힘을 위해 필수!)
   useEffect(() => {
     if (selectedSeat) {
-      // 전체 좌석 데이터(seats) 중에 내가 지금 띄워놓은 좌석(selectedSeat)의 최신 상태를 찾음
       const liveSeat = seats.find(s => s.id === selectedSeat.id);
-      
-      // 만약 DB의 최신 상태(liveSeat)와 모달창이 알고 있는 상태가 다르면? -> 최신 상태로 덮어씌움!
       if (liveSeat && liveSeat.status !== selectedSeat.status) {
         setSelectedSeat(liveSeat);
       }
@@ -72,18 +139,16 @@ function App() {
         setTimeLeft((prev) => prev - 1);
       }, 1000);
     } else if (timeLeft === 0) {
-      // 15초 끝나면 QR 숨기기 (보안상 자동 폐기)
       setShowSeatQR(false);
       alert("⌛ 보안을 위해 QR 코드가 만료되었습니다. 다시 눌러주세요.");
     }
     return () => clearInterval(timer);
   }, [showSeatQR, timeLeft]);
 
-  
-
   const saveExamPeriod = async () => {
     if (!examStartDate || !examEndDate) return alert("날짜와 시간을 입력해주세요.");
     await setDoc(doc(db, "System", "config"), { examStartDate, examEndDate, isExamActive: true }, { merge: true });
+    setIsExamActive(true); 
     alert("✅ 시험 기간 정책이 활성화되었습니다.");
   };
 
@@ -141,10 +206,61 @@ function App() {
               </div>
             </div>
           )}
+          
           <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: window.innerWidth < 850 ? 'center' : 'flex-end', gap: '15px' }}>
-            <p style={{ margin: 0, padding: 0, lineHeight: 1, fontWeight: '900', color: '#475569', fontSize: '0.95rem' }}>
-              👤 {user?.email?.split('@')[0]}님 {isAdmin && <span style={{ color: '#b45309' }}>[관리자]</span>}
-            </p>
+            
+            <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+              <p style={{ margin: 0, padding: 0, lineHeight: 1, fontWeight: '900', color: '#475569', fontSize: '0.95rem' }}>
+                👤 {user?.email?.split('@')[0]}님 {isAdmin && <span style={{ color: '#b45309' }}>[관리자]</span>}
+              </p>
+              
+              {/* ✨ 세련된 SVG 알림 버튼 */}
+              <div style={{ position: 'relative' }}>
+                <button 
+                  onClick={toggleNotifications}
+                  style={{ background: '#f1f5f9', border: 'none', width: '42px', height: '42px', borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', transition: '0.2s', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="#475569" style={{ width: '22px', height: '22px' }}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
+                  </svg>
+
+                  {unreadCount > 0 && (
+                    <span style={{ position: 'absolute', top: '-2px', right: '-2px', background: '#ef4444', color: '#fff', fontSize: '0.7rem', fontWeight: '900', width: '22px', height: '22px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: '2px solid #fff', boxShadow: '0 2px 4px rgba(239, 68, 68, 0.4)' }}>
+                      {unreadCount > 9 ? '9+' : unreadCount}
+                    </span>
+                  )}
+                </button>
+
+                {showNotifications && (
+                  <div style={{ position: 'absolute', top: '55px', right: '0', width: '320px', background: '#fff', borderRadius: '16px', boxShadow: '0 10px 40px rgba(0,0,0,0.15)', border: '1px solid #e2e8f0', zIndex: 1000, overflow: 'hidden' }}>
+                    <div style={{ padding: '15px 20px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <h4 style={{ margin: 0, color: '#0f172a', fontSize: '1rem', fontWeight: '900' }}>새로운 알림</h4>
+                      <span style={{ fontSize: '0.8rem', color: '#64748b', cursor: 'pointer', fontWeight: '700' }} onClick={() => setShowNotifications(false)}>닫기 ✕</span>
+                    </div>
+                    <div style={{ maxHeight: '350px', overflowY: 'auto', padding: '10px' }}>
+                      {notifications.length === 0 ? (
+                        <p style={{ textAlign: 'center', color: '#94a3b8', fontSize: '0.9rem', padding: '30px 0', margin: 0, fontWeight: '700' }}>새로운 알림이 없습니다.</p>
+                      ) : (
+                        notifications.map(noti => {
+                          // 🔥 [핵심 수정 3] 화면에 뿌려줄 때도 두 방식 모두 완벽 호환!
+                          const timeObj = noti.timestamp || noti.createdAt;
+                          const isUnread = (timeObj?.toDate ? timeObj.toDate().getTime() : 0) > lastReadTime;
+                          return (
+                            <div key={noti.id} style={{ padding: '12px 15px', borderBottom: '1px solid #f1f5f9', display: 'flex', flexDirection: 'column', gap: '5px', background: isUnread ? '#eff6ff' : 'transparent', borderRadius: '8px' }}>
+                              <span style={{ fontSize: '0.9rem', color: '#334155', fontWeight: '700' }}>{getNotificationText(noti.action, noti.seatLabel)}</span>
+                              <span style={{ fontSize: '0.75rem', color: '#94a3b8', fontWeight: '600' }}>
+                                {timeObj?.toDate ? timeObj.toDate().toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '방금 전'}
+                              </span>
+                            </div>
+                          )
+                        })
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
             <div style={{ display: 'flex', gap: '8px', margin: 0, padding: 0 }}>
               <button onClick={() => setViewMode(viewMode === 'MYPAGE' ? 'MAP' : 'MYPAGE')} style={{ background: viewMode === 'MYPAGE' ? '#2563eb' : '#f1f5f9', color: viewMode === 'MYPAGE' ? '#fff' : '#334155', border: 'none', borderRadius: '12px', fontWeight: '900', fontSize: '0.85rem', padding: '10px 16px', cursor: 'pointer', boxShadow: '0 2px 5px rgba(0,0,0,0.05)', transition: 'all 0.2s ease' }}>
                 {viewMode === 'MYPAGE' ? '배치도' : '마이페이지'}
@@ -178,7 +294,17 @@ function App() {
             ))}
           </div>
 
-          <FloorMap activeFloor={activeFloor} title={floorTitles[activeFloor]} seats={seats} user={user} isAdmin={isAdmin} currentUserData={currentUserData} viewMode={viewMode} now={now} setSelectedSeat={setSelectedSeat} setShowCancelWarning={setShowCancelWarning} />
+          {seats.length === 0 ? (
+            <div style={{ width: '100%', padding: '50px 0', textAlign: 'center', background: '#fff', borderRadius: '20px', boxShadow: '0 4px 10px rgba(0,0,0,0.05)' }}>
+              <h3 style={{ color: '#475569', fontWeight: '900', marginBottom: '10px' }}>⏳ 도서관 좌석을 불러오는 중입니다...</h3>
+              <p style={{ color: '#94a3b8', fontSize: '0.9rem', marginBottom: '20px' }}>네트워크 상태에 따라 조금 걸릴 수 있습니다.</p>
+              <button onClick={() => window.location.reload()} style={{ padding: '10px 20px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '10px', color: '#475569', fontWeight: '900', cursor: 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
+                🔄 새로고침
+              </button>
+            </div>
+          ) : (
+            <FloorMap activeFloor={activeFloor} title={floorTitles[activeFloor]} seats={seats} user={user} isAdmin={isAdmin} currentUserData={currentUserData} viewMode={viewMode} now={now} setSelectedSeat={setSelectedSeat} setShowCancelWarning={setShowCancelWarning} />
+          )}
           
           <SeatModal
             selectedSeat={selectedSeat} setSelectedSeat={setSelectedSeat}
